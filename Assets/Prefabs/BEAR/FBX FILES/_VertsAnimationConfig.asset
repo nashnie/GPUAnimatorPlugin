@@ -25,6 +25,6 @@ MonoBehaviour:
     frameSkip: 1
     totalFrames: 37
     loopStartFrame: 0
-    isVertsAnimation: 0
+    isVertsAnimation: 1
     textureSize: 512
     totalVerts: 2176

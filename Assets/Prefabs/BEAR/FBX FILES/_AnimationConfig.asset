@@ -11,8 +11,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0a1bf8da4c0aea94390f6950d08fee0b, type: 3}
   m_Name: _AnimationConfig
   m_EditorClassIdentifier: 
-  skinningTexSize: 0
-  totalJoints: 0
+  skinningTexSize: 64
+  totalJoints: 28
   meshAnimations:
   - isCreate: 0
     clipName: 
@@ -25,3 +25,6 @@ MonoBehaviour:
     frameSkip: 1
     totalFrames: 37
     loopStartFrame: 0
+    isVertsAnimation: 0
+    textureSize: 0
+    totalVerts: 0

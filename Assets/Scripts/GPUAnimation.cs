@@ -3,9 +3,6 @@ using UnityEngine;
 [System.Serializable]
 public class GPUAnimation
 {
-    public bool isCreate = false;
-    public string clipName;
-
     [System.NonSerialized]
     public string[] joints;
     [System.NonSerialized]

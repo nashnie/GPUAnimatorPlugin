@@ -65,6 +65,8 @@ public class GPUAnimationCreator : EditorWindow
 	private Avatar animAvatar;
 	[SerializeField]
 	private bool requiresAnimator;
+    [SerializeField]
+    private bool bakeVertices = false;
 
     private void OnEnable()
 	{
@@ -155,7 +157,9 @@ public class GPUAnimationCreator : EditorWindow
 				if (requiresAnimator)
 				{
 					if (animAvatar == null)
-						GetAvatar();
+                    {
+                        GetAvatar();
+                    }
 					animAvatar = EditorGUILayout.ObjectField("Avatar", animAvatar, typeof(Avatar), true) as Avatar;
 					if (animAvatar == null)
 					{
@@ -178,11 +182,14 @@ public class GPUAnimationCreator : EditorWindow
 								break;
 							}
 					}
-				}
+                }
 
                 fps = EditorGUILayout.IntSlider("Bake FPS", fps, 1, 500);
 
-				globalBake = EditorGUILayout.IntSlider("Global Frame Skip", globalBake, 1, fps);
+                bakeVertices = EditorGUILayout.Toggle("Bake Vertices(or Bake JointMatrixs)", bakeVertices);
+
+                globalBake = EditorGUILayout.IntSlider("Global Frame Skip", globalBake, 1, fps);
+
 				bool bChange = globalBake != previousGlobalBake;
 				previousGlobalBake = globalBake;
 
@@ -302,6 +309,119 @@ public class GPUAnimationCreator : EditorWindow
 		GUILayout.EndScrollView();
 	}
 
+    private void CaptureSnapShot(AnimationClip animClip, float bakeFrames, float bakeDelta, GPUAnimation meshAnim, Color[] meshTexturePixels, ref int pixelIndex)
+    {
+        float animationTime = bakeDelta * animClip.length;
+
+        foreach (string path in positionPathHash)
+        {
+            string boneName = path.Substring(path.LastIndexOf("/") + 1);
+            if (bonesMap.ContainsKey(boneName))
+            {
+                Transform child = joints[bonesMap[boneName]];
+                float postionX = GetAnimationClipCurve(animClip, path, positionPath + ".x", bakeDelta);
+                float postionY = GetAnimationClipCurve(animClip, path, positionPath + ".y", bakeDelta);
+                float postionZ = GetAnimationClipCurve(animClip, path, positionPath + ".z", bakeDelta);
+                child.localPosition = new Vector3(postionX, postionY, postionZ);
+            }
+        }
+
+        foreach (string path in rotationPathHash)
+        {
+            string boneName = path.Substring(path.LastIndexOf("/") + 1);
+            if (bonesMap.ContainsKey(boneName))
+            {
+                Transform child = joints[bonesMap[boneName]];
+                float rotationX = GetAnimationClipCurve(animClip, path, rotationPath + ".x", bakeDelta);
+                float rotationY = GetAnimationClipCurve(animClip, path, rotationPath + ".y", bakeDelta);
+                float rotationZ = GetAnimationClipCurve(animClip, path, rotationPath + ".z", bakeDelta);
+                float rotationW = GetAnimationClipCurve(animClip, path, rotationPath + ".w", bakeDelta);
+                Quaternion rotation = new Quaternion(rotationX, rotationY, rotationZ, rotationW);
+                float r = rotationX * rotationX + rotationY * rotationY + rotationZ * rotationZ + rotationW * rotationW;
+                if (r >= .1f)
+                {
+                    r = 1.0f / Mathf.Sqrt(r);
+                    rotation.x *= r;
+                    rotation.y *= r;
+                    rotation.z *= r;
+                    rotation.w *= r;
+                }
+
+                child.localRotation = rotation;
+            }
+        }
+
+        for (int k = 0; k < bonesMap.Count; k++)
+        {
+            Transform child = joints[k];
+
+            Matrix4x4 matrix = child.transform.localToWorldMatrix;
+            meshAnim.clipJoints[k].jontFrameMatrixs[k] = matrix;
+            matrix = matrix * bindSkeletonPoses[k];
+            meshTexturePixels[pixelIndex] = new Color(matrix.m00, matrix.m01, matrix.m02, matrix.m03);
+            pixelIndex++;
+            meshTexturePixels[pixelIndex] = new Color(matrix.m10, matrix.m11, matrix.m12, matrix.m13);
+            pixelIndex++;
+            meshTexturePixels[pixelIndex] = new Color(matrix.m20, matrix.m21, matrix.m22, matrix.m23);
+            pixelIndex++;
+        }
+    }
+
+    private void CaptureSnapShot(AnimationClip animClip, float bakeFrames, GPUAnimation meshAnim, GameObject sampleGO)
+    {
+        List<GPUAnimationFrameData> verts = new List<GPUAnimationFrameData>();
+        List<Vector3> meshesInFrame = new List<Vector3>();
+        float lastFrameTime = 0;
+        for (int i = 0; i <= bakeFrames; i += frameSkips[animClip.name])
+        {
+            float bakeDelta = Mathf.Clamp01(((float)i / bakeFrames));
+            EditorUtility.DisplayProgressBar("Baking Animation", string.Format("Processing: {0} Frame: {1}", animClip.name, i), bakeDelta);
+            float animationTime = bakeDelta * animClip.length;
+            if (requiresAnimator)
+            {
+                float normalizedTime = animationTime / animClip.length;
+                animator.Play(animClip.name, 0, normalizedTime);
+                if (lastFrameTime == 0)
+                {
+                    float nextBakeDelta = Mathf.Clamp01(((float)(i += frameSkips[animClip.name]) / bakeFrames));
+                    float nextAnimationTime = nextBakeDelta * animClip.length;
+                    lastFrameTime = animationTime - nextAnimationTime;
+                }
+                animator.Update(animationTime - lastFrameTime);
+                lastFrameTime = animationTime;
+            }
+            else
+            {
+                GameObject sampleObject = sampleGO;
+                Animation legacyAnimation = sampleObject.GetComponentInChildren<Animation>();
+                if (animator && animator.gameObject != sampleObject)
+                    sampleObject = animator.gameObject;
+                else if (legacyAnimation && legacyAnimation.gameObject != sampleObject)
+                    sampleObject = legacyAnimation.gameObject;
+                animClip.SampleAnimation(sampleObject, animationTime);
+            }
+            meshesInFrame.Clear();
+
+            Mesh m = null;
+
+            SkinnedMeshRenderer sampleSr = sampleGO.GetComponentInChildren<SkinnedMeshRenderer>();
+            m = new Mesh();
+            sampleSr.BakeMesh(m);
+            Vector3[] v = m.vertices;
+            for (int vIndex = 0; vIndex < v.Length; vIndex++)
+            {
+                v[vIndex] = sampleSr.transform.TransformPoint(v[vIndex]);
+            }
+            meshesInFrame.AddRange(v);
+            DestroyImmediate(m);
+
+            GPUAnimationFrameData data = new GPUAnimationFrameData();
+            data.SetVerts(meshesInFrame.ToArray());
+            verts.Add(data);
+        }
+        meshAnim.verts = verts.ToArray();
+    }
+
     private void InitAnimationClipHashPath(AnimationClip clip)
     {
         positionPathHash.Clear();
@@ -350,12 +470,6 @@ public class GPUAnimationCreator : EditorWindow
         EditorCurveBinding curveBinding = EditorCurveBinding.FloatCurve(path, typeof(Transform), propertyName);
         AnimationCurve animationCurve = AnimationUtility.GetEditorCurve(clip, curveBinding);
         return animationCurve.Evaluate(delta);
-    }
-
-    private static float GetCurveValue(AnimationClip clip, string path, string prop, float time)
-    {
-        EditorCurveBinding binding = EditorCurveBinding.FloatCurve(path, typeof(Transform), prop);
-        return AnimationUtility.GetEditorCurve(clip, binding).Evaluate(time);
     }
 
     private void CreateSnapshots()
@@ -458,30 +572,36 @@ public class GPUAnimationCreator : EditorWindow
                     meshAnim.wrapMode = animClip.wrapMode;
                 }
                 meshAnim.frameSkip = frameSkips[animClip.name];
-
                 meshAnimationList.meshAnimations[x] = meshAnim;
             }
 
+            Color[] meshTexturePixels = null;
+            Texture2D meshTexture = null;
             int textureSize = 2;
-            while (textureSize * textureSize < startIndex)
-            {
-                textureSize = textureSize << 1;
-            }
-
-            Texture2D meshTexture = new Texture2D(textureSize, textureSize, TextureFormat.RGBAHalf, false, true);
-            meshTexture.filterMode = FilterMode.Point;
-
-            Color[] meshTexturePixels = meshTexture.GetPixels();
-            Matrix4x4 matrix = Matrix4x4.identity;
             int pixelIndex = 0;
-            for (int i = 0; i < bonesMap.Count; i++)
-            {
-                meshTexturePixels[pixelIndex] = new Color(matrix.m00, matrix.m01, matrix.m02, matrix.m03);
-                pixelIndex++;
-                meshTexturePixels[pixelIndex] = new Color(matrix.m10, matrix.m11, matrix.m12, matrix.m13);
-                pixelIndex++;
-                meshTexturePixels[pixelIndex] = new Color(matrix.m20, matrix.m21, matrix.m22, matrix.m23);
-                pixelIndex++;
+
+            if (bakeVertices == false)
+            {         
+                while (textureSize * textureSize < startIndex)
+                {
+                    textureSize = textureSize << 1;
+                }
+
+                meshTexture = new Texture2D(textureSize, textureSize, TextureFormat.RGBAHalf, false, true);
+                meshTexture.filterMode = FilterMode.Point;
+
+                meshTexturePixels = meshTexture.GetPixels();
+                Matrix4x4 matrix = Matrix4x4.identity;
+              
+                for (int i = 0; i < bonesMap.Count; i++)
+                {
+                    meshTexturePixels[pixelIndex] = new Color(matrix.m00, matrix.m01, matrix.m02, matrix.m03);
+                    pixelIndex++;
+                    meshTexturePixels[pixelIndex] = new Color(matrix.m10, matrix.m11, matrix.m12, matrix.m13);
+                    pixelIndex++;
+                    meshTexturePixels[pixelIndex] = new Color(matrix.m20, matrix.m21, matrix.m22, matrix.m23);
+                    pixelIndex++;
+                }
             }
 
             int animCount = 0;
@@ -495,120 +615,113 @@ public class GPUAnimationCreator : EditorWindow
                 int frame = 0;
                 for (int i = 0; i <= bakeFrames; i += frameSkips[animClip.name])
                 {
-                    float bakeDelta = Mathf.Clamp01(((float)i / bakeFrames));
-                    EditorUtility.DisplayProgressBar("Baking Animation", string.Format("Processing: {0} Frame: {1}", animClip.name, i), bakeDelta);
-                    float animationTime = bakeDelta * animClip.length;
-
-                    foreach (string path in positionPathHash)
+                    if (bakeVertices)
                     {
-                        string boneName = path.Substring(path.LastIndexOf("/") + 1);
-                        if (bonesMap.ContainsKey(boneName))
-                        {
-                            Transform child = joints[bonesMap[boneName]];
-                            float postionX = GetAnimationClipCurve(animClip, path, positionPath + ".x", bakeDelta);
-                            float postionY = GetAnimationClipCurve(animClip, path, positionPath + ".y", bakeDelta);
-                            float postionZ = GetAnimationClipCurve(animClip, path, positionPath + ".z", bakeDelta);
-                            child.localPosition = new Vector3(postionX, postionY, postionZ);
-                        }
+                        CaptureSnapShot(animClip, bakeFrames, meshAnim, sampleGO);
                     }
-
-                    foreach (string path in rotationPathHash)
+                    else
                     {
-                        string boneName = path.Substring(path.LastIndexOf("/") + 1);
-                        if (bonesMap.ContainsKey(boneName))
-                        {
-                            Transform child = joints[bonesMap[boneName]];
-                            float rotationX = GetAnimationClipCurve(animClip, path, rotationPath + ".x", bakeDelta);
-                            float rotationY = GetAnimationClipCurve(animClip, path, rotationPath + ".y", bakeDelta);
-                            float rotationZ = GetAnimationClipCurve(animClip, path, rotationPath + ".z", bakeDelta);
-                            float rotationW = GetAnimationClipCurve(animClip, path, rotationPath + ".w", bakeDelta);
-                            Quaternion rotation = new Quaternion(rotationX, rotationY, rotationZ, rotationW);
-                            float r = rotationX * rotationX + rotationY * rotationY + rotationZ * rotationZ + rotationW * rotationW;
-                            if (r >= .1f)
-                            {
-                                r = 1.0f / Mathf.Sqrt(r);
-                                rotation.x *= r;
-                                rotation.y *= r;
-                                rotation.z *= r;
-                                rotation.w *= r;
-                            }
-
-                            child.localRotation = rotation;
-                        }
+                        float bakeDelta = Mathf.Clamp01(((float)i / bakeFrames));
+                        EditorUtility.DisplayProgressBar("Baking Animation", string.Format("Processing: {0} Frame: {1}", animClip.name, i), bakeDelta);
+                        CaptureSnapShot(animClip, bakeFrames, bakeDelta, meshAnim, meshTexturePixels, ref pixelIndex);
                     }
-
-                    for (int k = 0; k < bonesMap.Count; k++)
-                    {
-                        Transform child = joints[k];
-
-                        matrix = child.transform.localToWorldMatrix;
-                        meshAnim.clipJoints[k].jontFrameMatrixs[k] = matrix;
-                        matrix = matrix * bindSkeletonPoses[k];
-                        meshTexturePixels[pixelIndex] = new Color(matrix.m00, matrix.m01, matrix.m02, matrix.m03);
-                        pixelIndex++;
-                        meshTexturePixels[pixelIndex] = new Color(matrix.m10, matrix.m11, matrix.m12, matrix.m13);
-                        pixelIndex++;
-                        meshTexturePixels[pixelIndex] = new Color(matrix.m20, matrix.m21, matrix.m22, matrix.m23);
-                        pixelIndex++;
-                    }
-
                     frame++;
                 }
                 meshAnim.meshTexturePixels = meshTexturePixels;
                 animCount++;
             }
-
-            meshTexture.SetPixels(meshTexturePixels);
-            meshTexture.Apply();
-            AssetDatabase.CreateAsset(meshTexture, assetFolder + "_AnimationTexture.asset");
-            meshAnimationList.totalJoints = bonesMap.Count;
-            meshAnimationList.skinningTexSize = textureSize;
-
-            AssetDatabase.CreateAsset(meshAnimationList, assetFolder + "_AnimationConfig.asset");
-
-            SkinnedMeshRenderer skinnedMeshRenderer = sampleGO.GetComponentInChildren<SkinnedMeshRenderer>();
-            Mesh sharedMesh = skinnedMeshRenderer.sharedMesh;
-            Transform[] transforms = skinnedMeshRenderer.bones;
-            int vertexCount = sharedMesh.vertexCount;
-            List<Vector4> indices = new List<Vector4>();
-            List<Vector4> weights = new List<Vector4>();
-            Vector3[] vertices = new Vector3[vertexCount];
-            Vector3[] normals = new Vector3[vertexCount];
-
-            Matrix4x4 meshMatrix = skeletonPoses[bonesMap[transforms[0].name]] * sharedMesh.bindposes[0];
-            BoneWeight[] boneWeights = sharedMesh.boneWeights;
-            for (int v = 0; v < vertexCount; v++)
+            if (bakeVertices)
             {
-                BoneWeight weight = boneWeights[v];
-                float weight0 = weight.weight0;
-                float weight1 = weight.weight1;
-                float weight2 = weight.weight2;
-                float weight3 = weight.weight3;
-                int boneIndex0 = bonesMap[transforms[weight.boneIndex0].name];
-                int boneIndex1 = bonesMap[transforms[weight.boneIndex1].name];
-                int boneIndex2 = bonesMap[transforms[weight.boneIndex2].name];
-                int boneIndex3 = bonesMap[transforms[weight.boneIndex3].name];
-                indices.Add(new Vector4(boneIndex0, boneIndex1, boneIndex2, boneIndex3));
-                weights.Add(new Vector4(weight0, weight1, weight2, weight3));
-                vertices[v] = meshMatrix * sharedMesh.vertices[v];
-                normals[v] = meshMatrix * sharedMesh.normals[v];
-                weight.boneIndex0 = boneIndex0;
-                weight.boneIndex1 = boneIndex1;
-                weight.boneIndex2 = boneIndex2;
-                weight.boneIndex3 = boneIndex3;
-                boneWeights[v] = weight;
+                for (int i = 0; i < meshAnimationList.meshAnimations.Length; i++)
+                {
+                    GPUAnimation animation = meshAnimationList.meshAnimations[i];
+                    animation.isVertsAnimation = true;
+                    int smallTextureSize = 0;              
+                    int totalCountPixels = 0;
+                    for (int j = 0; j < animation.verts.Length; j++)
+                    {
+                        totalCountPixels += animation.verts[j].decompressed.Length;
+                    }
+                    CalculateTextureSize(ref smallTextureSize, totalCountPixels);
+                    Texture2D meshSmallTexture = new Texture2D(smallTextureSize, smallTextureSize, TextureFormat.RGBAHalf, false, true);
+                    animation.textureSize = smallTextureSize;
+                    Color[] meshSmallTextureData = meshSmallTexture.GetPixels();
+                    meshSmallTexture.filterMode = FilterMode.Point;
+                    int meshSmallTextureDataIndex = 0;
+                    for (int k = 0; k < animation.verts.Length; k++)
+                    {
+                        GPUAnimationFrameData animationFrameData = animation.verts[k];
+                        animation.totalVerts = animationFrameData.decompressed.Length;
+                     
+                        for (int n = 0; n < animationFrameData.decompressed.Length; n++)
+                        {
+                            Vector3 vert = animationFrameData.decompressed[n];                       
+                            meshSmallTextureData[meshSmallTextureDataIndex] = new Color(vert.x, vert.y, vert.z);
+                            meshSmallTextureDataIndex++;
+                            //meshSmallTexture.SetPixel(n, k, new Color(vert.x, vert.y, vert.z));
+                        }
+                    }
+     
+                    meshSmallTexture.SetPixels(meshSmallTextureData);
+                    meshSmallTexture.Apply();
+                    AssetDatabase.CreateAsset(meshSmallTexture, assetFolder + "_VertsAnimationTexture.asset");
+                }
+                AssetDatabase.CreateAsset(meshAnimationList, assetFolder + "_VertsAnimationConfig.asset");
             }
+            else
+            {
+                meshTexture.SetPixels(meshTexturePixels);
+                meshTexture.Apply();
+                AssetDatabase.CreateAsset(meshTexture, assetFolder + "_AnimationTexture.asset");
+                meshAnimationList.totalJoints = bonesMap.Count;
+                meshAnimationList.skinningTexSize = textureSize;
 
-            Mesh newMesh = new Mesh();
-            newMesh.vertices = vertices;
-            newMesh.normals = normals;
-            newMesh.triangles = sharedMesh.triangles;
-            newMesh.uv = sharedMesh.uv;
-            newMesh.SetUVs(1, indices);
-            newMesh.SetUVs(2, weights);
-            skinnedMeshRenderer.bones = joints;
-            skinnedMeshRenderer.sharedMesh = newMesh;
-            AssetDatabase.CreateAsset(newMesh, assetFolder + "_" + sharedMesh.name + ".asset");
+                AssetDatabase.CreateAsset(meshAnimationList, assetFolder + "_AnimationConfig.asset");
+
+                SkinnedMeshRenderer skinnedMeshRenderer = sampleGO.GetComponentInChildren<SkinnedMeshRenderer>();
+                Mesh sharedMesh = skinnedMeshRenderer.sharedMesh;
+                Transform[] transforms = skinnedMeshRenderer.bones;
+                int vertexCount = sharedMesh.vertexCount;
+                List<Vector4> indices = new List<Vector4>();
+                List<Vector4> weights = new List<Vector4>();
+                Vector3[] vertices = new Vector3[vertexCount];
+                Vector3[] normals = new Vector3[vertexCount];
+
+                Matrix4x4 meshMatrix = skeletonPoses[bonesMap[transforms[0].name]] * sharedMesh.bindposes[0];
+                BoneWeight[] boneWeights = sharedMesh.boneWeights;
+                for (int v = 0; v < vertexCount; v++)
+                {
+                    BoneWeight weight = boneWeights[v];
+                    float weight0 = weight.weight0;
+                    float weight1 = weight.weight1;
+                    float weight2 = weight.weight2;
+                    float weight3 = weight.weight3;
+                    int boneIndex0 = bonesMap[transforms[weight.boneIndex0].name];
+                    int boneIndex1 = bonesMap[transforms[weight.boneIndex1].name];
+                    int boneIndex2 = bonesMap[transforms[weight.boneIndex2].name];
+                    int boneIndex3 = bonesMap[transforms[weight.boneIndex3].name];
+                    indices.Add(new Vector4(boneIndex0, boneIndex1, boneIndex2, boneIndex3));
+                    weights.Add(new Vector4(weight0, weight1, weight2, weight3));
+                    vertices[v] = meshMatrix * sharedMesh.vertices[v];
+                    normals[v] = meshMatrix * sharedMesh.normals[v];
+                    weight.boneIndex0 = boneIndex0;
+                    weight.boneIndex1 = boneIndex1;
+                    weight.boneIndex2 = boneIndex2;
+                    weight.boneIndex3 = boneIndex3;
+                    boneWeights[v] = weight;
+                }
+
+                Mesh newMesh = new Mesh();
+                newMesh.vertices = vertices;
+                newMesh.normals = normals;
+                newMesh.triangles = sharedMesh.triangles;
+                newMesh.uv = sharedMesh.uv;
+                newMesh.SetUVs(1, indices);
+                newMesh.SetUVs(2, weights);
+                skinnedMeshRenderer.bones = joints;
+                skinnedMeshRenderer.sharedMesh = newMesh;
+                AssetDatabase.CreateAsset(newMesh, assetFolder + "_" + sharedMesh.name + ".asset");
+            }
         }
         GameObject.DestroyImmediate(sampleGO);
         EditorUtility.ClearProgressBar();
@@ -616,6 +729,16 @@ public class GPUAnimationCreator : EditorWindow
             , clips.Count > 1 ? "s" : string.Empty), "OK");
         AssetDatabase.DeleteAsset(AssetDatabase.GetAssetPath(bakeController));
 	}
+
+    private void CalculateTextureSize(ref int textureSize, int totalCount)
+    {
+        textureSize = 2;
+        while (textureSize * textureSize < totalCount)
+        {
+            textureSize = textureSize << 1;
+        }
+    }
+
 	private Avatar GetAvatar()
 	{
 		if (animAvatar)

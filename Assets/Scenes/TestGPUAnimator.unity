@@ -330,7 +330,7 @@ MeshFilter:
   m_PrefabParentObject: {fileID: 0}
   m_PrefabInternal: {fileID: 0}
   m_GameObject: {fileID: 1465505619}
-  m_Mesh: {fileID: 4300000, guid: 0942965ea559af2439b025b5910bc223, type: 2}
+  m_Mesh: {fileID: 0}
 --- !u!4 &1465505623
 Transform:
   m_ObjectHideFlags: 0
@@ -361,8 +361,6 @@ MonoBehaviour:
   defaultAnimation:
     isCreate: 0
     clipName: 
-    joints: []
-    clipJoints: []
     animationName: 
     playbackSpeed: 1
     wrapMode: 0
@@ -372,7 +370,7 @@ MonoBehaviour:
     frameSkip: 1
     totalFrames: 0
     loopStartFrame: 0
-  meshAnimationList: {fileID: 11400000, guid: 7e209560c493c554d9ef2c5b50f137bb, type: 2}
+  meshAnimationList: {fileID: 0}
   meshTexturePixels: []
   joints: []
   currentPixelIndex: 0

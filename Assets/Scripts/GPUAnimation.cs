@@ -6,9 +6,9 @@ public class GPUAnimation
     public bool isCreate = false;
     public string clipName;
 
-    //[System.NonSerialized]
+    [System.NonSerialized]
     public string[] joints;
-    //[System.NonSerialized]
+    [System.NonSerialized]
     public Skeleton[] clipJoints;
     [System.NonSerialized]
     public Color[] meshTexturePixels;
@@ -28,6 +28,13 @@ public class GPUAnimation
 	public int totalFrames = 0;
 
     public int loopStartFrame;
+
+    [System.NonSerialized]
+    public GPUAnimationFrameData[] verts;
+
+    public bool isVertsAnimation = false;
+    public int textureSize = 0;
+    public int totalVerts = 0;
 
     private void OnEnable()
 	{

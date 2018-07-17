@@ -16,6 +16,7 @@ public class GPUAnimator : MonoBehaviour, IAnimator
     public float playbackSpeed = 1f;
     private int currentFrame;
     private int totalJoints = 0;
+    private int totalVerts = 0;
 
     public GPUAnimation defaultAnimation;
     public GPUAnimationList meshAnimationList;
@@ -42,13 +43,22 @@ public class GPUAnimator : MonoBehaviour, IAnimator
         defaultAnimation = meshAnimationList.meshAnimations[0];
         totalJoints = meshAnimationList.totalJoints;
         animations = meshAnimationList.meshAnimations;
-        skinningTexSize = meshAnimationList.skinningTexSize;
-        pixelsStartIndex = defaultAnimation.startIndex;
+        if (defaultAnimation.isVertsAnimation)
+        {
+            skinningTexSize = defaultAnimation.textureSize;
+            pixelsStartIndex = 0;
+        }
+        else
+        {
+            skinningTexSize = meshAnimationList.skinningTexSize;
+            pixelsStartIndex = defaultAnimation.startIndex;
+        }
 
         meshRenderer = gameObject.GetComponent<MeshRenderer>();
         meshRenderer.material.SetInt("_StartPixelIndex", pixelsStartIndex);
         meshRenderer.material.SetInt("_SkinningTexSize", skinningTexSize);
         currentAnimIndex = 0;
+        totalVerts = defaultAnimation.totalVerts;
     }
 
     void Start()
@@ -143,8 +153,14 @@ public class GPUAnimator : MonoBehaviour, IAnimator
                 return;
             }
         }
-
-        currentPixelIndex = pixelsStartIndex + totalJoints * currentFrame * perFramePixelsCount;
+        if (currentAnimation.isVertsAnimation)
+        {
+            currentPixelIndex = totalVerts * currentFrame;
+        }
+        else
+        {
+            currentPixelIndex = pixelsStartIndex + totalJoints * currentFrame * perFramePixelsCount;
+        }
         meshRenderer.material.SetInt("_StartPixelIndex", currentPixelIndex);
     }
 }

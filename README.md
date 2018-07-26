@@ -1,5 +1,9 @@
 # GPUAnimatorPlugin
-Optimization for animation systems.
-The animation system has two performance hotspots, one is animation file volume optimization, such as compression, precision reduction, etc.; the second is skin optimization, such as pre-calculation, offline calculation of skin buffer vertex data, or skinning calculation using GPU acceleration; The former space changes time, and the latter GPU changes CPU. Both of these optimizations have problems with inconvenient animation mixing and require ongoing research.
-# Partial algorithm reference
+有两种GPU加速模式
+1，每一帧缓存顶点坐标，顶点着色器根据帧数和顶点编号获取顶点进行渲染；<br>
+2，每一帧缓存骨骼变换矩阵，顶点着色器计算蒙皮；<br>
+# 综述
+1，模式一，优点几乎不占用cpu和gpu消耗缺点动画文件体积较大（30帧左右，大概3M大小）；<br>
+2，模式二，优点动画文件体积比原生动画文件还小，不占用CPU，GPU计算蒙皮；缺点GPU压力；<br>
+# 部分算法参考
 https://github.com/genechiu/GpuAnimation
